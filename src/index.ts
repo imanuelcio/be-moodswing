@@ -23,8 +23,8 @@ app.get("/", (c) => {
   return c.json({ message: "Welcome to the moodswing API" });
 });
 
-app.route("/api/auth", authRoutes);
-// app.route("/api/user", userRoutes);
+app.route("/auth", authRoutes);
+// app.route("/user", userRoutes);
 
 app.get("/health", (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });
