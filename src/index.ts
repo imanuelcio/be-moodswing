@@ -19,6 +19,10 @@ app.use(
   })
 );
 
+app.get("/", (c) => {
+  return c.json({ message: "Welcome to the moodswing API" });
+});
+
 app.route("/api/auth", authRoutes);
 // app.route("/api/user", userRoutes);
 
