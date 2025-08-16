@@ -6,6 +6,8 @@ export interface User {
   nonce?: string;
   last_login?: string;
   metadata?: Record<string, any>;
+  fullname?: string;
+  email?: string;
 }
 
 export interface AuthRequest {
