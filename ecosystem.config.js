@@ -8,7 +8,7 @@ module.exports = {
       exec_mode: "cluster", // manfaatkan multi-core
       env: {
         NODE_ENV: "production",
-        PORT: "5000", // sesuaikan
+        PORT: "8000", // sesuaikan
       },
       watch: false, // production: false (lebih stabil)
       max_memory_restart: "300M",
