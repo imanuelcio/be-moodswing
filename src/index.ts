@@ -22,7 +22,7 @@ app.use(
 );
 
 // Routes
-app.route("/", routes);
+app.route("/api", routes);
 
 // Health check
 app.get("/health", (c) => {

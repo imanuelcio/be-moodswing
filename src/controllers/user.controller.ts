@@ -20,7 +20,7 @@ export class UserController {
 
   async getProfile(c: Context) {
     try {
-      const { userId } = c.get("user");
+      const { userId } = c.get("userId");
 
       const user = await this.supabaseService.getUserById(userId);
 

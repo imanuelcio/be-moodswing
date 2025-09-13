@@ -13,14 +13,9 @@ import {
 const router = new Hono();
 const userController = new UserController();
 
-// All routes require authentication
-router.use("*", authMiddleware);
-
-// Apply different rate limits for different endpoints
 const standardRateLimit = rateLimiter(100, 60 * 1000); // 100 requests per minute
 const strictRateLimit = rateLimiter(5, 60 * 1000); // 5 requests per minute
 
-// User routes
 router.get("/profile", standardRateLimit, (c) => userController.getProfile(c));
 
 router.patch(
