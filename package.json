@@ -2,22 +2,31 @@
   "name": "backend",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "deploy": "npm run build && pm2 start ecosystem.config.js --env production",
     "reload": "npm run build && pm2 reload ecosystem.config.js --env production",
+    "redis": "docker run -d --name my-redis -p 6379:6379 redis:7-alpine",
+    "redis:stop": "docker stop my-redis && docker rm my-redis",
     "stop": "pm2 stop ecosystem.config.js && pm2 delete ecosystem.config.js"
   },
   "dependencies": {
     "@hono/node-server": "^1.18.2",
+    "@noble/ed25519": "^3.0.0",
     "@solana/web3.js": "^1.98.4",
     "@supabase/supabase-js": "^2.55.0",
     "bs58": "^6.0.0",
     "dotenv": "^17.2.1",
+    "ethers": "^6.15.0",
     "hono": "^4.9.1",
+    "ioredis": "^5.8.0",
+    "jose": "^6.1.0",
     "jsonwebtoken": "^9.0.2",
+    "pino": "^9.11.0",
     "tweetnacl": "^1.0.3",
+    "viem": "^2.37.8",
+    "ws": "^8.18.3",
     "zod": "^4.0.17"
   },
   "devDependencies": {

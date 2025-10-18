@@ -1,54 +1,113 @@
-import { SupabaseService } from "./supabase.service.js";
-import type { User } from "../types/index.js";
+import {
+  type User,
+  UserRepository,
+  type CreateUserData,
+  type UpdateUserData,
+} from "../repo/user.repo.js";
+import { WalletRepository } from "../repo/wallet.repo.js";
+import {
+  ValidationError,
+  ConflictError,
+  NotFoundError,
+} from "../core/errors.js";
 
 export class UserService {
-  private supabaseService: SupabaseService;
+  constructor(
+    private userRepo = new UserRepository(),
+    private walletRepo = new WalletRepository()
+  ) {}
 
-  constructor() {
-    this.supabaseService = new SupabaseService();
-  }
-
-  async getUserProfile(userId: string): Promise<User | null> {
-    return await this.supabaseService.getUserById(userId);
-  }
-
-  async updateUserProfile(
-    userId: string,
-    data: Partial<User>
-  ): Promise<User | null> {
-    return await this.supabaseService.updateUser(userId, data);
-  }
-
-  async searchUsers(query: string): Promise<User[]> {
-    return await this.supabaseService.searchUsers(query);
-  }
-
-  async getUserStats(userId: string): Promise<any> {
-    const user = await this.supabaseService.getUserById(userId);
-
+  async getUserById(id: string): Promise<User> {
+    const user = await this.userRepo.findById(id);
     if (!user) {
-      return null;
+      throw new NotFoundError("User", id);
+    }
+    return user;
+  }
+
+  async getUserProfile(userId: string) {
+    const user = await this.userRepo.findById(userId);
+    if (!user) {
+      throw new NotFoundError("User", userId);
     }
 
+    const wallets = await this.walletRepo.findByUser(userId);
+    const primaryWallet = await this.walletRepo.findPrimaryWallet(userId);
+
     return {
-      user,
-      stats: {
-        accountAge: this.calculateAccountAge(user.created_at),
-        lastActive: user.last_login,
-        profileComplete: this.isProfileComplete(user),
+      ...user,
+      wallets,
+      primaryWallet,
+    };
+  }
+
+  async updateUser(id: string, userData: UpdateUserData): Promise<User> {
+    // Check if handle is being updated and if it's unique
+    if (userData.handle) {
+      const existingUser = await this.userRepo.findByHandle(userData.handle);
+      if (existingUser && existingUser.id !== id) {
+        throw new ConflictError(`Handle '${userData.handle}' is already taken`);
+      }
+    }
+
+    // Check if email is being updated and if it's unique
+    if (userData.email) {
+      const existingUser = await this.userRepo.findByEmail(userData.email);
+      if (existingUser && existingUser.id !== id) {
+        throw new ConflictError(`Email '${userData.email}' is already in use`);
+      }
+    }
+
+    return this.userRepo.update(id, userData);
+  }
+
+  async searchUsers(
+    params: {
+      search?: string;
+      page?: number;
+      limit?: number;
+    } = {}
+  ) {
+    const { search, page = 1, limit = 20 } = params;
+
+    if (limit > 100) {
+      throw new ValidationError("Limit cannot exceed 100");
+    }
+
+    const offset = (page - 1) * limit;
+
+    const result = await this.userRepo.list({
+      search,
+      offset,
+      limit,
+    });
+
+    const totalPages = Math.ceil(result.total / limit);
+
+    return {
+      users: result.users,
+      pagination: {
+        page,
+        limit,
+        total: result.total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
       },
     };
   }
 
-  private calculateAccountAge(createdAt: string): number {
-    const created = new Date(createdAt);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - created.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
-  }
+  async getUserStats() {
+    // Get basic user count
+    const { users, total } = await this.userRepo.list({ limit: 1 });
 
-  private isProfileComplete(user: User): boolean {
-    return !!(user.fullname && user.email);
+    // Get wallet stats
+    const walletStats = await this.walletRepo.getWalletStats();
+
+    return {
+      totalUsers: total,
+      totalWallets: walletStats.totalWallets,
+      walletsByChain: walletStats.byChain,
+    };
   }
 }

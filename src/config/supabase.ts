@@ -1,16 +1,29 @@
 import { createClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
+import { env } from "./env.js";
 
-dotenv.config();
+export const supabase = createClient(
+  env.SUPABASE_URL,
+  env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+    db: {
+      schema: "public",
+    },
+  }
+);
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+export async function executeQuery<T>(
+  queryBuilder: any,
+  operation: string = "query"
+): Promise<T> {
+  const { data, error } = await queryBuilder;
 
-if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
-  throw new Error("Missing Supabase environment variables");
+  if (error) {
+    throw new Error(`Supabase ${operation} failed: ${error.message}`);
+  }
+
+  return data;
 }
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);

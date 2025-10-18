@@ -1,166 +1,257 @@
-// /controller/sse.ts
 import type { Context } from "hono";
-import { stream } from "hono/streaming";
-import { sseBroadcaster } from "../lib/sse.js";
-import { SSEQuerySchema } from "../schemas/index.js";
+import { sseManager, type SSEClient } from "../core/sse.js";
+import { topics } from "../core/topics.js";
+import { MarketRepository } from "../repo/market.repo.js";
+import { OutcomeRepository } from "../repo/outcome.repo.js";
+import { BetRepository } from "../repo/bet.repo.js";
+import { formatError, ValidationError, NotFoundError } from "../core/errors.js";
+import { logger } from "../core/logger.js";
+import {
+  ensureHermesPriceStream,
+  fetchHermesLatest,
+  releaseHermesPriceStream,
+} from "../workers/hermes-pool.js";
 
-/**
- * Controller for Server-Sent Events
- */
+export class SSEController {
+  constructor(
+    private marketRepo = new MarketRepository(),
+    private outcomeRepo = new OutcomeRepository(),
+    private betRepo = new BetRepository()
+  ) {}
 
-/**
- * Market updates SSE stream
- * GET /sse/markets?ids=market1,market2,market3
- */
-export async function marketUpdates(c: Context) {
-  try {
-    // Parse and validate query parameters
-    const ids = c.req.query("ids");
-    if (!ids) {
-      return c.json(
-        {
-          error: {
-            code: "BAD_REQUEST",
-            message: "Market IDs are required (query parameter: ids)",
-          },
-        },
-        400
-      );
-    }
+  async streamMarketTicker(c: Context) {
+    try {
+      const marketId = c.req.param("id");
 
-    const validatedQuery = SSEQuerySchema.parse({ ids });
-    const marketIds = validatedQuery.ids;
-
-    if (marketIds.length === 0) {
-      return c.json(
-        {
-          error: {
-            code: "BAD_REQUEST",
-            message: "At least one market ID is required",
-          },
-        },
-        400
-      );
-    }
-
-    if (marketIds.length > 10) {
-      return c.json(
-        {
-          error: {
-            code: "BAD_REQUEST",
-            message: "Cannot subscribe to more than 10 markets at once",
-          },
-        },
-        400
-      );
-    }
-
-    // Get Last-Event-ID header for reconnection support
-    const lastEventId = c.req.header("Last-Event-ID");
-
-    // Start SSE stream
-    return stream(c, async (stream) => {
-      try {
-        // Subscribe to market updates
-        await sseBroadcaster.subscribe(c, marketIds, lastEventId);
-      } catch (error) {
-        console.error("SSE stream error:", error);
-
-        // Send error event and close stream
-        try {
-          await stream.write("event: error\n");
-          await stream.write(
-            `data: ${JSON.stringify({
-              error: "Stream connection failed",
-              code: "STREAM_ERROR",
-            })}\n\n`
-          );
-        } catch (writeError) {
-          console.error("Failed to write error to stream:", writeError);
-        }
+      // Validate market exists
+      const market = await this.marketRepo.findById(marketId);
+      if (!market) {
+        return c.json(formatError(new NotFoundError("Market", marketId)), 404);
       }
-    });
-  } catch (error) {
-    console.error("Failed to start SSE stream:", error);
 
-    if (error instanceof Error && error.message.includes("validation")) {
-      return c.json(
-        {
-          error: {
-            code: "BAD_REQUEST",
-            message: "Invalid query parameters",
-          },
-        },
-        400
-      );
+      const { pyth_price_id: priceId, symbol } = market;
+      if (!priceId || !symbol) {
+        return c.json(
+          formatError(new Error("Market missing priceId/symbol")),
+          400
+        );
+      }
+      const clientId = `market-${marketId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 11)}`;
+      const { client, response } = sseManager.createSSEConnection(c, clientId);
+
+      // Subscribe to market topics
+      sseManager.subscribeToTopic(clientId, topics.marketTicker(marketId));
+      sseManager.subscribeToTopic(clientId, topics.marketTrades(marketId));
+      sseManager.subscribeToTopic(clientId, topics.marketResolved(marketId));
+
+      // Send initial snapshot
+      await this.sendMarketSnapshot(client, marketId);
+      const latest = await fetchHermesLatest(priceId);
+      if (latest) {
+        sseManager.publish(topics.marketTicker(marketId), "price", {
+          symbol,
+          priceId,
+          source: "PYTH/HERMES",
+          ...latest,
+        });
+      }
+
+      // === KUNCI: restream dari Hermes → publish ke topik ticker market ini
+      // Pastikan hanya satu koneksi upstream per priceId (HermesPool)
+      ensureHermesPriceStream(priceId, symbol, (payload) => {
+        // broadcast ke semua client yg subscribe market ini
+        sseManager.publish(topics.marketTicker(marketId), "price", payload);
+      });
+
+      // Auto cleanup saat koneksi klien ini tutup
+      c.req.raw.signal?.addEventListener("abort", () => {
+        client.close();
+        // turunkan refcount; hentikan upstream jika tak ada pemakai lain
+        releaseHermesPriceStream(priceId);
+      });
+
+      return response;
+    } catch (error) {
+      logger.error({ error }, "Failed to create market ticker stream");
+      return c.json(formatError(error as Error), 500);
     }
-
-    return c.json(
-      {
-        error: {
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to start market updates stream",
-        },
-      },
-      500
-    );
   }
-}
 
-/**
- * Health check for SSE endpoint
- * GET /sse/health
- */
-export async function sseHealth(c: Context) {
-  return c.json({
-    success: true,
-    data: {
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      activeConnections: sseBroadcaster["clients"]?.size || 0,
-    },
-  });
-}
-
-/**
- * Get SSE connection stats (admin only)
- * GET /sse/stats
- */
-export async function sseStats(c: Context) {
-  try {
-    const clients = sseBroadcaster["clients"] || new Map();
-    const marketSequences = sseBroadcaster["marketSequences"] || new Map();
-
-    const stats = {
-      totalConnections: clients.size,
-      totalMarkets: marketSequences.size,
-      connectionsByMarket: {} as { [marketId: string]: number },
-      sequences: Object.fromEntries(marketSequences),
-    };
-
-    // Count connections per market
-    for (const client of clients.values()) {
-      for (const marketId of client.marketIds) {
-        stats.connectionsByMarket[marketId] =
-          (stats.connectionsByMarket[marketId] || 0) + 1;
+  async streamSentiment(c: Context) {
+    try {
+      const symbol = c.req.query("symbol");
+      if (!symbol) {
+        return c.json(
+          formatError(new ValidationError("Symbol parameter required")),
+          400
+        );
       }
+
+      const clientId = `sentiment-${symbol}-${Date.now()}-${Math.random()
+        .toString(36)
+        .substr(2, 9)}`;
+
+      // Create SSE connection - DESTRUCTURE the return value
+      const { client, response } = sseManager.createSSEConnection(c, clientId);
+
+      // Subscribe to sentiment topic
+      sseManager.subscribeToTopic(clientId, topics.symbolSentiment(symbol));
+
+      // Send initial sentiment data
+      await this.sendSentimentSnapshot(client, symbol);
+
+      // Handle connection close
+      c.req.raw.signal?.addEventListener("abort", () => {
+        client.close();
+      });
+
+      return response;
+    } catch (error) {
+      logger.error({ error }, "Failed to create sentiment stream");
+      return c.json(formatError(error as Error), 500);
     }
+  }
 
-    return c.json({
-      success: true,
-      data: stats,
-    });
-  } catch (error) {
-    console.error("Failed to get SSE stats:", error);
+  async streamLeaderboard(c: Context) {
+    try {
+      const period = c.req.query("period") || "all";
+      const metric = c.req.query("metric") || "points";
 
-    return c.json(
-      {
-        error: {
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to get SSE statistics",
+      const clientId = `leaderboard-${period}-${metric}-${Date.now()}-${Math.random()
+        .toString(36)
+        .substr(2, 9)}`;
+
+      // Create SSE connection - DESTRUCTURE the return value
+      const { client, response } = sseManager.createSSEConnection(c, clientId);
+
+      // Subscribe to leaderboard topic
+      sseManager.subscribeToTopic(
+        clientId,
+        topics.leaderboardUpdate(period, metric)
+      );
+
+      // Send initial leaderboard data
+      await this.sendLeaderboardSnapshot(client, period, metric);
+
+      // Handle connection close
+      c.req.raw.signal?.addEventListener("abort", () => {
+        client.close();
+      });
+
+      return response;
+    } catch (error) {
+      logger.error({ error }, "Failed to create leaderboard stream");
+      return c.json(formatError(error as Error), 500);
+    }
+  }
+
+  private async sendMarketSnapshot(
+    client: SSEClient,
+    marketId: string
+  ): Promise<void> {
+    try {
+      // Ambil data paralel biar respons lebih cepat
+      const [market, stats, outcomesWithStats, recentBets] = await Promise.all([
+        this.marketRepo.findWithOutcomes(marketId),
+        this.marketRepo.getMarketStats(marketId),
+        this.outcomeRepo.getOutcomesWithStats(marketId),
+        this.betRepo.getMarketBets(marketId, { limit: 10 }),
+      ]);
+
+      if (!market) {
+        client.send("error", { message: `Market ${marketId} not found` });
+        return;
+      }
+
+      const snapshot = {
+        market: {
+          ...market,
+          market_outcomes: outcomesWithStats ?? [],
+          stats: stats ?? {
+            volume_24h: 0,
+            open_interest: 0,
+            total_bets: 0,
+            unique_bettors: 0,
+          },
         },
-      },
-      500
-    );
+        recentBets: (recentBets ?? []).slice(0, 10),
+        timestamp: new Date().toISOString(),
+      };
+
+      // kirim event terstruktur
+      client.send("market_snapshot", snapshot);
+    } catch (error) {
+      logger.error({ error, marketId }, "Failed to send market snapshot");
+      client.send("error", {
+        message: "Failed to load market snapshot",
+        marketId,
+      });
+    }
+  }
+
+  private async sendSentimentSnapshot(
+    client: any,
+    symbol: string
+  ): Promise<void> {
+    try {
+      // Get latest sentiment data for symbol
+      // This would integrate with your sentiment repository
+      const snapshot = {
+        type: "snapshot",
+        data: {
+          symbol,
+          sentiment: {
+            score: 0.65,
+            confidence: 0.8,
+            volume: 1250,
+            timestamp: new Date().toISOString(),
+          },
+          recentPosts: [],
+        },
+      };
+
+      client.send(`data: ${JSON.stringify(snapshot)}\n\n`);
+    } catch (error) {
+      logger.error({ error, symbol }, "Failed to send sentiment snapshot");
+    }
+  }
+
+  private async sendLeaderboardSnapshot(
+    client: any,
+    period: string,
+    metric: string
+  ): Promise<void> {
+    try {
+      // Get leaderboard data
+      // This would integrate with your leaderboard/points repository
+      const snapshot = {
+        type: "snapshot",
+        data: {
+          period,
+          metric,
+          leaderboard: [],
+          lastUpdated: new Date().toISOString(),
+        },
+      };
+
+      client.send(`data: ${JSON.stringify(snapshot)}\n\n`);
+    } catch (error) {
+      logger.error(
+        { error, period, metric },
+        "Failed to send leaderboard snapshot"
+      );
+    }
+  }
+
+  async getSSEStats(c: Context) {
+    try {
+      const stats = sseManager.getStats();
+      return c.json({ stats });
+    } catch (error) {
+      logger.error({ error }, "Failed to get SSE stats");
+      return c.json(formatError(error as Error), 500);
+    }
   }
 }

@@ -1,291 +1,254 @@
 import type { Context } from "hono";
-import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { z } from "zod";
 import { AuthService } from "../services/auth.service.js";
-import { SupabaseService } from "../services/supabase.service.js";
 import {
-  generateNonce,
-  createSignMessage,
-  verifySignature,
-} from "../utils/crypto.js";
+  formatError,
+  UnauthorizedError,
+  ValidationError,
+} from "../core/errors.js";
+import StoreCookieInResponse from "../utils/jwt.js";
+import { setCookie } from "hono/cookie";
 import {
-  generateToken,
-  generateRefreshToken,
-  verifyToken,
-} from "../utils/jwt.js";
-import { ApiResponseBuilder } from "../utils/apiResponse.js";
-import { sanitizeWalletAddress } from "../validation/sanitizers.js";
+  createApiKeySchema,
+  nonceSchema,
+  verifySchema,
+} from "../schemas/auth.schema.js";
 
-export class AuthController {
-  private authService: AuthService;
-  private supabaseService: SupabaseService;
-
-  constructor() {
-    this.authService = new AuthService();
-    this.supabaseService = new SupabaseService();
-  }
-
-  async getNonce(c: Context) {
+function getHostFromRequest(c: Context) {
+  // Prioritaskan Origin, fallback ke Host header, terakhir dari URL
+  const origin = c.req.header("origin") || c.req.header("Origin");
+  if (origin) {
     try {
-      const validatedData = c.get("validatedData");
-      const walletAddress = sanitizeWalletAddress(validatedData.walletAddress);
-
-      const nonce = generateNonce();
-      const message = createSignMessage(walletAddress, nonce);
-
-      // Store nonce in database
-      await this.supabaseService.upsertUser({
-        wallet_address: walletAddress.toLowerCase(),
-        nonce,
-      });
-
-      return ApiResponseBuilder.success(
-        c,
-        {
-          nonce,
-          message,
-        },
-        "Nonce generated successfully"
-      );
-    } catch (error: any) {
-      console.error("Nonce generation error:", error);
-      return ApiResponseBuilder.error(
-        c,
-        "Failed to generate nonce",
-        process.env.NODE_ENV !== "production" ? error.message : undefined
-      );
+      return new URL(origin).hostname;
+    } catch (_) {
+      /* noop */
     }
+  }
+  const host = c.req.header("host") || c.req.header("Host");
+  if (host) return host.split(":")[0];
+  return new URL(c.req.url).hostname;
+}
+function deriveCookieDomain(hostname: string | undefined) {
+  if (!hostname) return undefined;
+  if (hostname.endsWith(".vercel.app")) {
+    // Preview domains berbeda-beda per deploy → pakai host-only cookie (undefined)
+    return undefined;
+  }
+  // custom domain → ambil eTLD+1 sederhana
+  const parts = hostname.split(".");
+  if (parts.length >= 2) {
+    const base = parts.slice(-2).join(".");
+    return `.${base}`;
+  }
+  return undefined;
+}
+export class AuthController {
+  constructor(private authService = new AuthService()) {}
+
+  async generateNonce(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = nonceSchema.parse(body);
+
+      const hostname = getHostFromRequest(c);
+      const domain = (parsed.domain ?? hostname)?.toLowerCase();
+      if (!domain) throw new ValidationError("Domain is required");
+
+      const { nonce, message, expiresInSec } =
+        await this.authService.generateNonceForWallet(
+          parsed.address,
+          parsed.chainKind,
+          domain
+        );
+
+      if (!nonce || !message) {
+        throw new Error("Failed to generate nonce");
+      }
+      return c.json({ nonce, message, expiresInSec });
+    } catch (error) {
+      const logger = c.get("logger");
+      logger.error({ error }, "Failed to generate nonce");
+
+      if (error instanceof z.ZodError) {
+        return c.json(
+          formatError(new ValidationError("Invalid input", error)),
+          400
+        );
+      }
+      if (error instanceof ValidationError) {
+        return c.json(formatError(error), 400);
+      }
+      return c.json(formatError(error as Error), 500);
+    }
+  }
+  safeLogger(c: Context) {
+    const l = c.get("logger") as any;
+    return {
+      info: (obj: any, msg?: string) =>
+        l?.info ? l.info(obj, msg) : console.info(msg ?? "", obj),
+      error: (obj: any, msg?: string) =>
+        l?.error ? l.error(obj, msg) : console.error(msg ?? "", obj),
+    };
   }
 
   async verifySignature(c: Context) {
     try {
-      const validatedData = c.get("validatedData");
-      const { walletAddress, signature, message } = validatedData;
+      const body = await c.req.json();
+      const parsed = verifySchema.parse(body);
 
-      // Get user and verify nonce
-      const user = await this.supabaseService.getUserByWallet(walletAddress);
+      const hostname = getHostFromRequest(c);
+      const domain = (parsed.domain ?? hostname)?.toLowerCase();
+      if (!domain) throw new ValidationError("Domain is required");
 
-      if (!user) {
-        return ApiResponseBuilder.notFound(c, "User");
-      }
+      const { token, user, wallet } =
+        await this.authService.verifyWalletSignature({
+          address: parsed.address,
+          chainKind: parsed.chainKind,
+          domain,
+          nonce: parsed.nonce,
+          signature: parsed.signature,
+        });
 
-      // Verify signature
-      const isValid = verifySignature(message, signature, walletAddress);
+      const logger = this.safeLogger(c);
+      logger.info(
+        { userId: user.id, address: wallet.address, chain: wallet.chainKind },
+        "User authenticated"
+      );
 
-      if (!isValid) {
-        return ApiResponseBuilder.unauthorized(c, "Invalid signature");
-      }
-
-      // Check nonce in message
-      if (!message.includes(user.nonce)) {
-        return ApiResponseBuilder.unauthorized(c, "Invalid or expired nonce");
-      }
-
-      // Generate tokens
-      const accessToken = generateToken({
-        userId: user.id,
-        walletAddress: user.wallet_address,
-      });
-
-      const refreshToken = generateRefreshToken({
-        userId: user.id,
-        walletAddress: user.wallet_address,
-      });
-
-      // Update user login info
-      await this.supabaseService.updateUser(user.id, {
-        last_login: new Date().toISOString(),
-        nonce: undefined, // Clear nonce after successful auth
-      });
-
-      // Set cookies
-      const cookieOptions = {
+      const cookieDomain = deriveCookieDomain(hostname);
+      setCookie(c, "token", token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "Lax" as const,
-        path: "/",
-      };
-
-      setCookie(c, "access_token", accessToken, {
-        ...cookieOptions,
-        maxAge: 60 * 60 * 24, // 1 day
+        secure: process.env.NODE_ENV === "production", // di production harus secure
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 30, // 30 hari
+        // domain: cookieDomain,
       });
 
-      setCookie(c, "refresh_token", refreshToken, {
-        ...cookieOptions,
-        maxAge: 60 * 60 * 24 * 7, // 7 days
+      return c.json({
+        success: true,
+        user: { id: user.id, handle: user.handle },
+        wallet: { address: wallet.address, chainKind: wallet.chainKind },
+        message: "Authentication successful",
+      });
+    } catch (err) {
+      const logger = this.safeLogger(c);
+      logger.error({ err }, "Authentication failed");
+
+      // pakai formatError kamu → bungkus status di sini
+      const status =
+        err instanceof z.ZodError
+          ? 400
+          : err instanceof ValidationError
+          ? 400
+          : err instanceof UnauthorizedError
+          ? 401
+          : 500;
+
+      return c.json(formatError(err as Error), status);
+    }
+  }
+
+  async createApiKey(c: Context) {
+    try {
+      const userId = c.get("userId"); // From JWT middleware
+      if (!userId) {
+        return c.json(
+          formatError(new ValidationError("User ID required")),
+          401
+        );
+      }
+
+      const body = await c.req.json();
+      const { plan, rateLimitPerHour } = createApiKeySchema.parse(body);
+
+      const result = await this.authService.createApiKey({
+        ownerUserId: userId,
+        plan,
+        rateLimitPerHour,
       });
 
-      return ApiResponseBuilder.success(
-        c,
-        {
-          accessToken,
-          refreshToken,
-          user: {
-            id: user.id,
-            wallet_address: user.wallet_address,
-            fullname: user.fullname,
-            email: user.email,
-            created_at: user.created_at,
-            last_login: user.last_login,
-          },
-        },
-        "Authentication successful"
-      );
-    } catch (error: any) {
-      console.error("Verification error:", error);
-      return ApiResponseBuilder.error(
-        c,
-        "Authentication failed",
-        process.env.NODE_ENV !== "production" ? error.message : undefined
-      );
+      const logger = c.get("logger");
+      logger.info({ userId, keyId: result.id }, "API key created");
+
+      return c.json(result);
+    } catch (error) {
+      const logger = c.get("logger");
+      logger.error({ error }, "Failed to create API key");
+
+      if (error instanceof z.ZodError) {
+        return c.json(
+          formatError(new ValidationError("Invalid input", error.message)),
+          400
+        );
+      }
+
+      return c.json(formatError(error as Error), 500);
     }
   }
 
-  async logout(c: Context) {
+  async revokeApiKey(c: Context) {
     try {
-      const validatedData = c.get("validatedData") || {};
-      const { walletAddress } = validatedData;
+      const userId = c.get("userId");
+      const keyId = c.req.param("keyId");
 
-      // Clear nonce in database if wallet address provided
-      if (walletAddress) {
-        const user = await this.supabaseService.getUserByWallet(walletAddress);
-        if (user) {
-          await this.supabaseService.updateUser(user.id, { nonce: undefined });
-        }
+      if (!userId) {
+        return c.json(
+          formatError(new ValidationError("User ID required")),
+          401
+        );
       }
 
-      // Delete cookies
-      deleteCookie(c, "access_token", { path: "/" });
-      deleteCookie(c, "refresh_token", { path: "/" });
+      await this.authService.revokeApiKey(keyId, userId);
 
-      return ApiResponseBuilder.success(c, null, "Logged out successfully");
-    } catch (error: any) {
-      console.error("Logout error:", error);
-      return ApiResponseBuilder.error(
-        c,
-        "Logout failed",
-        process.env.NODE_ENV !== "production" ? error.message : undefined
-      );
+      const logger = c.get("logger");
+      logger.info({ userId, keyId }, "API key revoked");
+
+      return c.json({ success: true });
+    } catch (error) {
+      const logger = c.get("logger");
+      logger.error({ error }, "Failed to revoke API key");
+
+      return c.json(formatError(error as Error), 500);
     }
   }
 
-  async checkSession(c: Context) {
+  async listApiKeys(c: Context) {
     try {
-      const accessToken = getCookie(c, "access_token");
-
-      if (!accessToken) {
-        return ApiResponseBuilder.success(
-          c,
-          {
-            authenticated: false,
-            user: null,
-          },
-          "No active session"
+      const userId = c.get("userId");
+      if (!userId) {
+        return c.json(
+          formatError(new ValidationError("User ID required")),
+          401
         );
       }
 
-      try {
-        const payload = verifyToken(accessToken);
-        const user = await this.supabaseService.getUserById(payload.userId);
+      const apiKeys = await this.authService.listApiKeys(userId);
 
-        if (!user) {
-          // Token valid but user not found
-          deleteCookie(c, "access_token", { path: "/" });
-          deleteCookie(c, "refresh_token", { path: "/" });
+      return c.json({ apiKeys });
+    } catch (error) {
+      const logger = c.get("logger");
+      logger.error({ error }, "Failed to list API keys");
 
-          return ApiResponseBuilder.success(
-            c,
-            {
-              authenticated: false,
-              user: null,
-            },
-            "Session invalid"
-          );
-        }
-
-        return ApiResponseBuilder.success(c, {
-          authenticated: true,
-          user: {
-            id: user.id,
-            wallet_address: user.wallet_address,
-            fullname: user.fullname,
-            email: user.email,
-          },
-        });
-      } catch (tokenError) {
-        // Token expired or invalid
-        return ApiResponseBuilder.success(
-          c,
-          {
-            authenticated: false,
-            user: null,
-          },
-          "Session expired"
-        );
-      }
-    } catch (error: any) {
-      console.error("Session check error:", error);
-      return ApiResponseBuilder.error(
-        c,
-        "Failed to check session",
-        process.env.NODE_ENV !== "production" ? error.message : undefined
-      );
+      return c.json(formatError(error as Error), 500);
     }
   }
 
-  async refreshToken(c: Context) {
+  async getProfile(c: Context) {
     try {
-      const refreshToken =
-        getCookie(c, "refresh_token") || c.req.header("X-Refresh-Token");
+      const userId = c.get("userId");
+      const walletId = c.get("walletId");
+      const address = c.get("address");
+      const chainKind = c.get("chainKind");
 
-      if (!refreshToken) {
-        return ApiResponseBuilder.unauthorized(c, "No refresh token provided");
-      }
+      return c.json({
+        user: { id: userId },
+        wallet: { id: walletId, address, chainKind },
+      });
+    } catch (error) {
+      const logger = c.get("logger");
+      logger.error({ error }, "Failed to get profile");
 
-      try {
-        const payload = verifyToken(refreshToken);
-
-        // Verify user still exists
-        const user = await this.supabaseService.getUserById(payload.userId);
-        if (!user) {
-          return ApiResponseBuilder.unauthorized(c, "Invalid refresh token");
-        }
-
-        // Generate new access token
-        const newAccessToken = generateToken({
-          userId: payload.userId,
-          walletAddress: payload.walletAddress,
-        });
-
-        // Set new access token cookie
-        setCookie(c, "access_token", newAccessToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "Lax",
-          maxAge: 60 * 60 * 24, // 1 day
-          path: "/",
-        });
-
-        return ApiResponseBuilder.success(
-          c,
-          {
-            accessToken: newAccessToken,
-          },
-          "Token refreshed successfully"
-        );
-      } catch (tokenError) {
-        return ApiResponseBuilder.unauthorized(
-          c,
-          "Invalid or expired refresh token"
-        );
-      }
-    } catch (error: any) {
-      console.error("Token refresh error:", error);
-      return ApiResponseBuilder.error(
-        c,
-        "Failed to refresh token",
-        process.env.NODE_ENV !== "production" ? error.message : undefined
-      );
+      return c.json(formatError(error as Error), 500);
     }
   }
 }

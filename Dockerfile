@@ -1,9 +1,8 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine3.x AS base
 
 FROM base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-
 COPY package*.json ./
 RUN npm ci
 
@@ -15,16 +14,12 @@ RUN npm run build
 
 FROM base AS production
 WORKDIR /app
-
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
-
+RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
-COPY --from=deps --chown=nodejs:nodejs /app/node_modules ./node_modules
+COPY --from=deps   --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --chown=nodejs:nodejs package*.json ./
-
 USER nodejs
-
+ENV NODE_ENV=production
+ENV PORT=5000
 EXPOSE 5000
-
 CMD ["node", "dist/index.js"]
