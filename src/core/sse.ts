@@ -43,18 +43,11 @@ export class SSEManager {
   }
 
   createSSEConnection(c: Context, clientId: string, userId?: string) {
-    let client: SSEClient; // assigned in start()
+    let client: SSEClient;
 
     const stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
         const enc = new TextEncoder();
-
-        // headers SSE
-        c.header("Content-Type", "text/event-stream");
-        c.header("Cache-Control", "no-cache, no-transform");
-        c.header("Connection", "keep-alive");
-        c.header("X-Accel-Buffering", "no");
-        c.header("Access-Control-Allow-Origin", "*");
 
         client = {
           id: clientId,
@@ -87,14 +80,8 @@ export class SSEManager {
 
         this.clients.set(clientId, client);
 
-        // heartbeat (local)
-        // const hb = setInterval(() => {
-        //   if (!client.closed) controller.enqueue(enc.encode(": hb\n\n"));
-        // }, 15000);
-
         // auto close saat koneksi putus
         c.req.raw.signal?.addEventListener("abort", () => {
-          // clearInterval(hb);
           client.close();
         });
 
@@ -108,6 +95,9 @@ export class SSEManager {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "http://localhost:5173", // ← ADD THIS
+        "Access-Control-Allow-Credentials": "true", // ← ADD THIS
+        "X-Accel-Buffering": "no",
       },
     });
 

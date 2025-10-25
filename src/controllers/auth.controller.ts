@@ -116,12 +116,19 @@ export class AuthController {
       );
 
       const cookieDomain = deriveCookieDomain(hostname);
+      const isProduction = process.env.NODE_ENV === "production";
+
+      // Tentukan apakah cross-origin
+      const origin = c.req.header("origin");
+      const isCrossOrigin = origin && !origin.includes(hostname);
+
       setCookie(c, "token", token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production", // di production harus secure
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 30, // 30 hari
-        // domain: cookieDomain,
+        secure: isProduction,
+        sameSite: isCrossOrigin ? "none" : "lax", // PENTING: 'none' untuk cross-origin
+        maxAge: 60 * 60 * 24 * 30,
+        domain: cookieDomain, // Uncomment ini
+        path: "/",
       });
 
       return c.json({

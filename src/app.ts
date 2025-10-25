@@ -23,16 +23,18 @@ const ALLOWED = env.CORS_ORIGINS.split(",").map((s) =>
   s.trim().replace(/^"+|"+$/g, "")
 );
 
-console.log("CORS_ORIGINS:", ALLOWED);
-
 app.use(
   "*",
   cors({
-    origin: ALLOWED, // contoh: ["http://localhost:5173"]
+    origin: "http://localhost:5173",
     credentials: true,
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: ["*"], // santai untuk dev, gak rewel preflight
-    exposeHeaders: ["Content-Length", "X-Requested-With"],
+    allowHeaders: [
+      "Content-Type",
+      "Access-Control-Allow-Origin",
+      "Authorization",
+    ],
+    exposeHeaders: ["Content-Length", "X-Requested-With", "Content-Type"],
     maxAge: 86400,
   })
 );

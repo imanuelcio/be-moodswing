@@ -13,14 +13,15 @@ export function createJwtMiddleware() {
     try {
       const tokenFromCookies = getCookie(c, "token");
 
-      if (!tokenFromCookies || !tokenFromCookies.startsWith("Bearer ")) {
+      if (!tokenFromCookies) {
         return c.json(
           formatError(new UnauthorizedError("Missing JWT token")),
           401
         );
       }
 
-      const token = tokenFromCookies.substring(7); // Remove 'Bearer ' prefix
+      // PERBAIKAN: Cookie tidak pakai 'Bearer ', langsung token
+      const token = tokenFromCookies;
       const payload = verifyJwtToken(token);
 
       // Set user context
@@ -30,11 +31,19 @@ export function createJwtMiddleware() {
       c.set("chainKind", payload.chainKind);
 
       await next();
-    } catch (error) {
+    } catch (err) {
+      // PERBAIKAN: Handle logger yang mungkin undefined
       const logger = c.get("logger");
-      logger.error({ error }, "JWT authentication failed");
+      if (logger?.error) {
+        logger.error({ err }, "JWT authentication failed");
+      } else {
+        console.error("JWT authentication failed:", err);
+      }
 
-      return c.json(formatError(error as Error), 401);
+      return c.json(
+        formatError(err instanceof Error ? err : new Error(String(err))),
+        401
+      );
     }
   };
 }
@@ -61,11 +70,18 @@ export function createApiKeyMiddleware() {
       c.set("apiKeyRateLimit", payload.rateLimit);
 
       await next();
-    } catch (error) {
+    } catch (err) {
       const logger = c.get("logger");
-      logger.error({ error }, "API key authentication failed");
+      if (logger?.error) {
+        logger.error({ err }, "API key authentication failed");
+      } else {
+        console.error("API key authentication failed:", err);
+      }
 
-      return c.json(formatError(error as Error), 401);
+      return c.json(
+        formatError(err instanceof Error ? err : new Error(String(err))),
+        401
+      );
     }
   };
 }
@@ -74,19 +90,29 @@ export function createApiKeyMiddleware() {
 export function createAdminMiddleware() {
   return async (c: Context, next: Next) => {
     try {
-      // First check JWT
+      // First check JWT from cookie
+      const tokenFromCookies = getCookie(c, "token");
+
+      // Fallback to Authorization header if no cookie
       const authHeader = c.req.header("Authorization");
 
-      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      let token: string | undefined;
+
+      if (tokenFromCookies) {
+        token = tokenFromCookies;
+      } else if (authHeader?.startsWith("Bearer ")) {
+        token = authHeader.substring(7);
+      }
+
+      if (!token) {
         return c.json(
           formatError(
-            new UnauthorizedError("Missing or invalid authorization header")
+            new UnauthorizedError("Missing or invalid authorization")
           ),
           401
         );
       }
 
-      const token = authHeader.substring(7);
       const payload = verifyJwtToken(token);
 
       // Set user context
@@ -100,11 +126,18 @@ export function createAdminMiddleware() {
       // In production, you should check user roles/permissions
 
       await next();
-    } catch (error) {
+    } catch (err) {
       const logger = c.get("logger");
-      logger.error({ error }, "Admin authentication failed");
+      if (logger?.error) {
+        logger.error({ err }, "Admin authentication failed");
+      } else {
+        console.error("Admin authentication failed:", err);
+      }
 
-      return c.json(formatError(error as Error), 401);
+      return c.json(
+        formatError(err instanceof Error ? err : new Error(String(err))),
+        401
+      );
     }
   };
 }

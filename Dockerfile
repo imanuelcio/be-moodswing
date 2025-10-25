@@ -20,6 +20,6 @@ COPY --from=deps   --chown=nodejs:nodejs /app/node_modules ./node_modules
 COPY --chown=nodejs:nodejs package*.json ./
 USER nodejs
 ENV NODE_ENV=production
-ENV PORT=5000
-EXPOSE 5000
+ENV PORT=8000
+EXPOSE 8000
 CMD ["node", "dist/index.js"]

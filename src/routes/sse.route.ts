@@ -9,7 +9,7 @@ const sse = new Hono();
 const sseController = new SSEController();
 
 // Apply rate limiting to all SSE endpoints
-sse.use("/*", createRateLimitMiddleware(publicRateLimit));
+// sse.use("/*", createRateLimitMiddleware(publicRateLimit));
 
 // Market streams
 sse.get("/markets/:id", sseController.streamMarketTicker.bind(sseController));

@@ -96,10 +96,14 @@ export class MarketController {
       const market = await this.marketService.getMarketWithStats(marketId);
 
       return c.json({ market });
-    } catch (error) {
+    } catch (err) {
       const logger = c.get("logger");
-      logger.error({ error }, "Failed to get market");
-      return c.json(formatError(error as Error), 500);
+      if (logger?.error) {
+        logger.error({ err }, "JWT authentication failed");
+      } else {
+        console.error("JWT authentication failed:", err);
+      }
+      return c.json(formatError(err as Error), 500);
     }
   }
 
@@ -110,11 +114,15 @@ export class MarketController {
       const market = await this.marketService.getMarketBySlug(slug);
 
       return c.json({ market });
-    } catch (error) {
+    } catch (err) {
       const logger = c.get("logger");
-      logger.error({ error }, "Failed to get market by slug");
+      if (logger?.error) {
+        logger.error({ err }, "JWT authentication failed");
+      } else {
+        console.error("JWT authentication failed:", err);
+      }
 
-      return c.json(formatError(error as Error), 500);
+      return c.json(formatError(err as Error), 500);
     }
   }
 
