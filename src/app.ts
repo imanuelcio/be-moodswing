@@ -15,6 +15,7 @@ import { admin } from "./routes/admin.route.js";
 import { sse } from "./routes/sse.route.js";
 import { ensureRedis } from "./config/redis-ensure.js";
 import { redis } from "./config/redis.js";
+import { nftRoutes } from "./routes/nft.route.js";
 
 export const app = new Hono();
 
@@ -71,7 +72,7 @@ app.route("/api/v1/position", position);
 app.route("/api/v1/ws", ws);
 app.route("/api/v1/sse", sse);
 app.route("/api/v1/admin", admin);
-
+app.route("/api/v1/nft", nftRoutes);
 // Error handler
 app.onError((err, c) => {
   pinoLogger.error({ err });
