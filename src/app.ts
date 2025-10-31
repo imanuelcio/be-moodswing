@@ -23,11 +23,11 @@ export const app = new Hono();
 const ALLOWED = env.CORS_ORIGINS.split(",").map((s) =>
   s.trim().replace(/^"+|"+$/g, "")
 );
-
+console.log(env.CORS_ORIGINS);
 app.use(
   "*",
   cors({
-    origin: "https://moodswing.vercel.app",
+    origin: env.CORS_ORIGINS,
     credentials: true,
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: [
@@ -39,7 +39,6 @@ app.use(
     maxAge: 86400,
   })
 );
-
 // Optional: early return untuk preflight biar super cepat
 app.options("*", (c) => c.body(null, 204));
 
