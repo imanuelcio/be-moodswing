@@ -27,7 +27,7 @@ const ALLOWED = env.CORS_ORIGINS.split(",").map((s) =>
 app.use(
   "*",
   cors({
-    origin: "http://localhost:5173",
+    origin: "https://moodswing.vercel.app",
     credentials: true,
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: [
