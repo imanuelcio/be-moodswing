@@ -53,7 +53,7 @@ export class ResolutionService {
       throw new NotFoundError("Market", marketId);
     }
 
-    if (market.status !== "closed") {
+    if (market.status !== "CLOSED") {
       throw new ValidationError("Can only resolve closed markets");
     }
 
@@ -356,7 +356,7 @@ export class ResolutionService {
     let eligible = true;
 
     // Check market status
-    if (market.status !== "closed") {
+    if (market.status !== "CLOSED") {
       eligible = false;
       requirements.push("Market must be closed");
     }

@@ -47,7 +47,7 @@ export class DisputeService {
       throw new NotFoundError("Market", marketId);
     }
 
-    if (market.status !== "resolved") {
+    if (market.status !== "RESOLVED") {
       throw new ValidationError("Can only dispute resolved markets");
     }
 
