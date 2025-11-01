@@ -42,18 +42,15 @@ export class BetController {
         },
         201
       );
-    } catch (error) {
+    } catch (err) {
       const logger = c.get("logger");
-      logger.error({ error }, "Failed to place bet");
-
-      if (error instanceof z.ZodError) {
-        return c.json(
-          formatError(new ValidationError("Invalid input", error.message)),
-          400
-        );
+      if (logger?.error) {
+        logger.error({ err }, "JWT authentication failed");
+      } else {
+        console.error("JWT authentication failed:", err);
       }
 
-      return c.json(formatError(error as Error), 500);
+      return c.json(formatError(err as Error), 500);
     }
   }
 

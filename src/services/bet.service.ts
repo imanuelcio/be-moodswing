@@ -78,7 +78,7 @@ export class BetService {
       throw new NotFoundError("Market", marketId);
     }
 
-    if (market.status !== "open") {
+    if (market.status !== "OPEN") {
       throw new ValidationError("Market is not open for betting");
     }
 

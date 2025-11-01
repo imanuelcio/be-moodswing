@@ -305,7 +305,7 @@ export class MarketService {
       throw new ForbiddenError("Only market creator can close the market");
     }
 
-    if (market.status !== "open") {
+    if (market.status !== "OPEN") {
       throw new ValidationError("Can only close open markets");
     }
 

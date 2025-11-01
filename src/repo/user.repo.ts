@@ -22,7 +22,7 @@ export class UserRepository {
   async findById(id: string): Promise<User | null> {
     const { data, error } = await supabase
       .from("users")
-      .select("id, handle, email, created_at")
+      .select("id, handle, username, email, created_at")
       .eq("id", id)
       .single();
 

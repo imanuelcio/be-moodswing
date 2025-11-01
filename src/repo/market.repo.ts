@@ -14,7 +14,7 @@ export interface Market {
   visibility?: string;
   tags?: string[];
   settlement_type: "manual" | "oracle" | "community";
-  status: "draft" | "open" | "closed" | "resolved" | "disputed" | "cancelled";
+  status: "draft" | "OPEN" | "CLOSED" | "RESOLVED" | "disputed" | "cancelled";
   open_at?: string;
   close_at?: string;
   resolve_by?: string;

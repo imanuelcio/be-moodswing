@@ -1,6 +1,6 @@
 import { z } from "zod";
 export const placeBetSchema = z.object({
-  marketId: z.string().uuid(),
+  marketId: z.any(),
   outcomeKey: z.string().min(1),
   side: z.enum(["yes", "no", "buy", "sell"]),
   stakePoints: z.number().min(1).optional(),
