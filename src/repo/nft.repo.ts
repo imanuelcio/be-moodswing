@@ -11,9 +11,10 @@ export type TokenListFilters = {
 export async function listCollections() {
   const { data, error } = await supabase
     .from("nft_collections")
-    .select(
-      "id, chain_id, contract_address, symbol, name, royalties_bps, revenue_share_pct, created_at"
-    )
+    // .select(
+    //   "id, chain_id, slug, contract_address, symbol, name, royalties_bps, revenue_share_pct, created_at"
+    // )
+    .select("*")
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data ?? [];

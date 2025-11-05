@@ -199,8 +199,6 @@ export class PointsRepository {
   ): Promise<Array<{ user_id: string; balance: number; handle?: string }>> {
     const { limit = 100, period = "all" } = params;
 
-    // For simplicity, get current balances by latest entry per user
-    // In production, you might want a separate balances table
     const { data, error } = await supabase.rpc("get_points_leaderboard", {
       p_limit: limit,
       p_period: period,
@@ -214,7 +212,7 @@ export class PointsRepository {
           `
           user_id, 
           balance_after,
-          users(handle)
+          users(username, role)
         `
         )
         .order("created_at", { ascending: false });
@@ -232,7 +230,7 @@ export class PointsRepository {
           userBalances.set(entry.user_id, {
             user_id: entry.user_id,
             balance: entry.balance_after,
-            handle: entry.users,
+            detail: entry.users,
           });
         }
       });
