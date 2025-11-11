@@ -1,0 +1,56 @@
+import { supabase } from "../config/supabase.js";
+
+export interface Candle {
+  open_time: number;
+  close_time: number;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  base_volume: string;
+  quote_volume: string;
+  trades_count: number;
+  is_closed: boolean;
+}
+
+export class CandleRepository {
+  async getLastCandles(
+    marketId: number,
+    interval: string,
+    limit = 200
+  ): Promise<Candle[]> {
+    const { data, error } = await supabase
+      .from("market_candles")
+      .select("*")
+      .eq("market_id", marketId)
+      .eq("interval", interval)
+      .order("open_time", { ascending: true })
+      .limit(limit);
+    if (error) throw error;
+    return data as Candle[];
+  }
+
+  async upsertCandle(marketId: number, interval: string, candle: Candle) {
+    const { error } = await supabase.from("market_candles").upsert(
+      [
+        {
+          market_id: marketId,
+          interval,
+          open_time: candle.open_time,
+          close_time: candle.close_time,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          base_volume: candle.base_volume,
+          quote_volume: candle.quote_volume,
+          trades_count: candle.trades_count,
+          is_closed: candle.is_closed,
+        },
+      ],
+      { onConflict: "market_id,interval,open_time" }
+    );
+
+    if (error) console.error(error);
+  }
+}

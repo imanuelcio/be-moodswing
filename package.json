@@ -20,6 +20,7 @@
     "@noble/ed25519": "^3.0.0",
     "@solana/web3.js": "^1.98.4",
     "@supabase/supabase-js": "^2.55.0",
+    "axios": "^1.13.2",
     "bs58": "^6.0.0",
     "dotenv": "^17.2.1",
     "ethers": "^6.15.0",

@@ -23,7 +23,6 @@ export class SSEController {
     try {
       const marketId = c.req.param("id");
 
-      // Validate market exists
       const market = await this.marketRepo.findById(marketId);
       if (!market) {
         return c.json(formatError(new NotFoundError("Market", marketId)), 404);
@@ -41,12 +40,10 @@ export class SSEController {
         .slice(2, 11)}`;
       const { client, response } = sseManager.createSSEConnection(c, clientId);
 
-      // Subscribe to market topics
       sseManager.subscribeToTopic(clientId, topics.marketTicker(marketId));
       sseManager.subscribeToTopic(clientId, topics.marketTrades(marketId));
       sseManager.subscribeToTopic(clientId, topics.marketResolved(marketId));
 
-      // Send initial snapshot
       await this.sendMarketSnapshot(client, marketId);
       const latest = await fetchHermesLatest(priceId);
       if (latest) {
@@ -57,18 +54,12 @@ export class SSEController {
           ...latest,
         });
       }
-
-      // === KUNCI: restream dari Hermes → publish ke topik ticker market ini
-      // Pastikan hanya satu koneksi upstream per priceId (HermesPool)
       ensureHermesPriceStream(priceId, symbol, (payload) => {
-        // broadcast ke semua client yg subscribe market ini
         sseManager.publish(topics.marketTicker(marketId), "price", payload);
       });
 
-      // Auto cleanup saat koneksi klien ini tutup
       c.req.raw.signal?.addEventListener("abort", () => {
         client.close();
-        // turunkan refcount; hentikan upstream jika tak ada pemakai lain
         releaseHermesPriceStream(priceId);
       });
 
@@ -180,7 +171,6 @@ export class SSEController {
         timestamp: new Date().toISOString(),
       };
 
-      // kirim event terstruktur
       client.send("market_snapshot", snapshot);
     } catch (error) {
       logger.error({ error, marketId }, "Failed to send market snapshot");

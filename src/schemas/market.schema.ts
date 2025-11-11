@@ -55,3 +55,44 @@ export const listMarketsSchema = z.object({
   order_by: z.string().default("created_at"),
   order_dir: z.enum(["asc", "desc"]).default("desc"),
 });
+
+export const DataSource = z.enum(["BINANCE_SPOT", "BINANCE_FUTURES"]);
+
+export const Market = z.object({
+  id: z.number(),
+  slug: z.string(),
+  title: z.string(),
+  status: z.string(),
+  close_at: z.string().nullable().optional(),
+  open_at: z.string().nullable().optional(),
+  binance_symbol: z.string(), // e.g. BTCUSDT
+  data_source: DataSource, // BINANCE_SPOT | BINANCE_FUTURES
+  stream_intervals: z.array(z.string()), // ['1m','5m','1h','1d']
+});
+export type Market = z.infer<typeof Market>;
+
+// Binance kline WS payload (disederhanakan)
+export const BinanceKlineEvent = z.object({
+  stream: z.string(),
+  data: z.object({
+    e: z.string(), // event type
+    E: z.number(), // event time
+    s: z.string(), // symbol
+    k: z.object({
+      t: z.number(), // start time
+      T: z.number(), // close time
+      i: z.string(), // interval
+      f: z.number(), // first trade id
+      L: z.number(), // last trade id
+      o: z.string(), // open
+      c: z.string(), // close
+      h: z.string(), // high
+      l: z.string(), // low
+      v: z.string(), // base volume
+      n: z.number(), // trades
+      x: z.boolean(), // is kline closed?
+      q: z.string(), // quote volume
+    }),
+  }),
+});
+export type BinanceKlineEvent = z.infer<typeof BinanceKlineEvent>;

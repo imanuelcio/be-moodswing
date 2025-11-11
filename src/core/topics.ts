@@ -3,7 +3,7 @@ export const topics = {
   marketTicker: (marketId: string) => `market:${marketId}:ticker`,
   marketTrades: (marketId: string) => `market:${marketId}:trades`,
   marketResolved: (marketId: string) => `market:${marketId}:resolved`,
-
+  marketCandles: (marketId: string) => `market:${marketId}`,
   // User notifications
   userNotifications: (userId: string) => `user:${userId}:notifications`,
   userRelayer: (userId: string) => `user:${userId}:relayer`,

@@ -12,6 +12,7 @@ export interface Market {
   pyth_price_id?: string;
   resolution_rule?: {};
   visibility?: string;
+  binance_symbol?: string;
   tags?: string[];
   settlement_type: "manual" | "oracle" | "community";
   status: "draft" | "OPEN" | "CLOSED" | "RESOLVED" | "disputed" | "cancelled";

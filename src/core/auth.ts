@@ -53,6 +53,7 @@ export function verifyJwtToken(token: string): JwtPayload {
 }
 
 import { verifyMessage, getAddress } from "ethers";
+import nacl from "tweetnacl";
 
 export async function verifyEvmSignature(
   address: string,
@@ -96,16 +97,36 @@ export async function verifySolanaSignature(
   signature: string
 ): Promise<boolean> {
   try {
+    // Decode signature dari base64 ke Uint8Array
+    const sigBytes = new Uint8Array(Buffer.from(signature, "base64"));
+
+    // Decode public key dari base58 ke Uint8Array
+    const pubKeyBytes = bs58.decode(publicKey);
+
+    // Encode message ke Uint8Array
     const messageBytes = new TextEncoder().encode(message);
 
-    // decode base58
-    const pubKeyBytes = bs58.decode(publicKey);
-    const sigBytes = bs58.decode(signature);
+    // Verify signature (tweetnacl expects Uint8Array semua)
+    const isValid = nacl.sign.detached.verify(
+      messageBytes,
+      sigBytes,
+      pubKeyBytes
+    );
 
-    // verify
-    return await ed25519.verify(sigBytes, messageBytes, pubKeyBytes);
+    // console.log("🔍 Signature verification debug:");
+    // console.log("- Public key length:", pubKeyBytes.length);
+    // console.log("- Message length:", messageBytes.length);
+    // console.log("- Signature length:", sigBytes.length);
+    // console.log("- Verification result:", isValid);
+
+    return isValid;
   } catch (error) {
-    console.error("verifySolanaSignature error:", error);
+    console.error("❌ verifySolanaSignature error:", error);
+    console.error("Error details:", {
+      publicKey,
+      messageLength: message.length,
+      signatureLength: signature.length,
+    });
     return false;
   }
 }

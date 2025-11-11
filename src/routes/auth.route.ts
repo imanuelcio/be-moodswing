@@ -11,7 +11,7 @@ const authController = new AuthController();
 // Public auth endpoints
 auth.post("/nonce", authController.generateNonce.bind(authController));
 auth.post("/verify", authController.verifySignature.bind(authController));
-
+auth.post("/logout", authController.logout.bind(authController));
 // Protected endpoints (require JWT)
 auth.use("/profile", createJwtMiddleware());
 auth.get("/profile", authController.getProfile.bind(authController));

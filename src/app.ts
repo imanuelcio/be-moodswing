@@ -16,7 +16,8 @@ import { sse } from "./routes/sse.route.js";
 import { ensureRedis } from "./config/redis-ensure.js";
 import { redis } from "./config/redis.js";
 import { nftRoutes } from "./routes/nft.route.js";
-
+import { debugRoutes } from "./routes/debug.route.js";
+import binance from "./routes/binance.route.js";
 export const app = new Hono();
 
 // --- CORS FIRST ---
@@ -59,6 +60,8 @@ app.get("/api/v1/healthz", async (c) => {
   }
 });
 
+app.route("/api/v1/binance", binance);
+debugRoutes(app);
 // Routes (wajib pakai leading slash '/')
 app.route("/api/v1/auth", auth);
 app.route("/api/v1/user", user);

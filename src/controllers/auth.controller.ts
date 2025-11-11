@@ -6,8 +6,7 @@ import {
   UnauthorizedError,
   ValidationError,
 } from "../core/errors.js";
-import StoreCookieInResponse from "../utils/jwt.js";
-import { setCookie } from "hono/cookie";
+import { setCookie, deleteCookie } from "hono/cookie";
 import {
   createApiKeySchema,
   nonceSchema,
@@ -254,6 +253,30 @@ export class AuthController {
     } catch (error) {
       const logger = c.get("logger");
       logger.error({ error }, "Failed to get profile");
+
+      return c.json(formatError(error as Error), 500);
+    }
+  }
+
+  async logout(c: Context) {
+    try {
+      const userId = c.get("userId");
+      if (!userId) {
+        return c.json(
+          formatError(new ValidationError("User ID required")),
+          401
+        );
+      }
+      deleteCookie(c, "token", {
+        path: "/",
+        secure: true,
+        httpOnly: true,
+        sameSite: "Lax",
+      });
+      return c.json({ success: true });
+    } catch (error) {
+      const logger = c.get("logger");
+      logger.error({ error }, "Failed to logout");
 
       return c.json(formatError(error as Error), 500);
     }
